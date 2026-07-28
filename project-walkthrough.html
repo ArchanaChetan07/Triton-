@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>From a Resume to a Triton Compiler Fix</title>
+<style>
+  :root{
+    --ink:#14171c; --muted:#5b6672; --line:#e3e7ec; --soft:#f6f8fa;
+    --accent:#1857c4; --accent2:#0e7c66; --amber:#b7791f; --red:#c0392b;
+    --code-bg:#0f1622; --code-ink:#e6edf3; --code-kw:#7ee0c0;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  body{
+    font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    color:var(--ink); font-size:10.5pt; line-height:1.5; margin:0;
+  }
+  @page{ size:A4; margin:18mm 16mm 20mm 16mm;
+    @bottom-center{ content:counter(page); color:#8a94a0; font-size:9pt; } }
+  @page:first{ margin:0; }
+  h1,h2,h3,h4{ line-height:1.2; color:var(--ink); }
+  h2{ font-size:19pt; border-bottom:3px solid var(--accent); padding-bottom:5px; margin:0 0 12px; }
+  h3{ font-size:13.5pt; color:var(--accent); margin:20px 0 6px; }
+  h4{ font-size:11.5pt; margin:15px 0 4px; }
+  p{ margin:0 0 9px; }
+  code{ font-family:"Cascadia Code","Consolas",monospace; font-size:9pt;
+    background:#eef1f5; padding:1px 4px; border-radius:3px; color:#0b2d6b; }
+  pre{ background:var(--code-bg); color:var(--code-ink); border-radius:7px;
+    padding:12px 14px; font-family:"Cascadia Code","Consolas",monospace;
+    font-size:8.3pt; line-height:1.45; overflow-x:auto; white-space:pre-wrap;
+    word-break:break-word; margin:8px 0 12px; }
+  pre .c{ color:#8b98a5; } pre .k{ color:var(--code-kw); } pre .s{ color:#f0a868; }
+  .lang{ display:inline-block; font-size:7.5pt; letter-spacing:.08em; text-transform:uppercase;
+    color:#9fb0c3; margin-bottom:-4px; }
+  table{ border-collapse:collapse; width:100%; margin:10px 0 14px; font-size:9pt; }
+  th,td{ border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; }
+  th{ background:var(--soft); font-weight:600; }
+  td.n,th.n{ text-align:right; font-variant-numeric:tabular-nums; }
+  .callout{ border-radius:8px; padding:11px 14px; margin:12px 0; font-size:9.7pt; border:1px solid; }
+  .callout .t{ font-weight:700; display:block; margin-bottom:3px; letter-spacing:.02em; }
+  .beg{ background:#eef4ff; border-color:#c6dbff; }
+  .beg .t{ color:var(--accent); }
+  .key{ background:#e9f8f2; border-color:#b6e6d5; }
+  .key .t{ color:var(--accent2); }
+  .bug{ background:#fdecea; border-color:#f6c9c3; }
+  .bug .t{ color:var(--red); }
+  .fix{ background:#eef8ee; border-color:#c3e6c3; }
+  .fix .t{ color:#1e7a34; }
+  .warn{ background:#fdf6e9; border-color:#f0dcb0; }
+  .warn .t{ color:var(--amber); }
+  .badge{ display:inline-block; font-size:7.5pt; font-weight:700; padding:2px 8px; border-radius:20px;
+    letter-spacing:.05em; text-transform:uppercase; vertical-align:middle; margin-left:8px; }
+  .b-beg{ background:#e3efff; color:#1857c4; }
+  .b-int{ background:#fff2dd; color:#b7791f; }
+  .b-adv{ background:#f3e6ff; color:#7b3fc4; }
+  .part{ page-break-before:always; }
+  .lead{ font-size:11pt; color:var(--muted); }
+  ul,ol{ margin:4px 0 10px; padding-left:20px; } li{ margin:2px 0; }
+  .cover{ height:297mm; padding:34mm 22mm; display:flex; flex-direction:column;
+    justify-content:space-between; background:linear-gradient(160deg,#0f2038 0%,#183a6b 55%,#1857c4 100%);
+    color:#fff; }
+  .cover .eyebrow{ font-size:11pt; letter-spacing:.28em; text-transform:uppercase; color:#a9c6ff; }
+  .cover h1{ font-size:33pt; color:#fff; margin:14px 0 10px; line-height:1.12; }
+  .cover .sub{ font-size:14pt; color:#d6e4ff; font-weight:400; max-width:150mm; }
+  .cover .meta{ font-size:10pt; color:#bcd0f2; border-top:1px solid rgba(255,255,255,.25); padding-top:14px; }
+  .cover .chips span{ display:inline-block; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+    border-radius:20px; padding:4px 12px; font-size:9pt; margin:4px 6px 0 0; }
+  .toc{ page-break-after:always; }
+  .toc ol{ list-style:none; padding:0; counter-reset:p; }
+  .toc > ol > li{ margin:9px 0 3px; font-weight:700; font-size:11pt; color:var(--ink); }
+  .toc ol ol{ padding-left:14px; } .toc ol ol li{ font-weight:400; font-size:9.7pt; color:var(--muted); margin:2px 0; }
+  .diagram{ background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:14px; margin:12px 0; }
+  .flow{ display:flex; align-items:stretch; gap:0; font-size:8.6pt; text-align:center; }
+  .flow .stage{ flex:1; padding:9px 6px; border:1px solid var(--line); background:#fff; }
+  .flow .stage b{ display:block; font-size:9.3pt; } .flow .stage .sm{ color:var(--muted); font-size:7.8pt; }
+  .flow .arrow{ align-self:center; padding:0 4px; color:var(--accent); font-weight:700; }
+  .flow .stage.hot{ background:#fdecea; border-color:#f6c9c3; }
+  .kfig{ text-align:center; font-size:9pt; color:var(--muted); margin:-6px 0 12px; }
+  .divnum{ font-variant-numeric:tabular-nums; }
+  .small{ font-size:8.8pt; color:var(--muted); }
+  hr{ border:none; border-top:1px solid var(--line); margin:16px 0; }
+  .tag{ color:var(--accent); font-weight:700; }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="cover">
+  <div>
+    <div class="eyebrow">Engineering Walkthrough</div>
+    <h1>From a Résumé to a<br>Triton Compiler Fix</h1>
+    <div class="sub">How a career question became a real, verified bug fix in Triton — OpenAI's open-source GPU compiler — explained from first principles to the final patch.</div>
+  </div>
+  <div>
+    <div class="chips">
+      <span>triton-lang/triton #10987</span>
+      <span>Root cause → Patch → Tests</span>
+      <span>Beginner → Advanced</span>
+    </div>
+    <p class="meta" style="margin-top:22px;">
+      A complete account of the reproduction, the root-cause analysis, the fix,
+      and the bugs found &amp; fixed in the work itself.<br>
+      Prepared for Archana Suresh Patil &nbsp;·&nbsp; 2026-07-23
+    </p>
+  </div>
+</section>
+
+<!-- ============ TOC ============ -->
+<section class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>Executive summary</li>
+    <li>Part I — The big picture <span class="badge b-beg">Beginner</span>
+      <ol>
+        <li>1. It started with a résumé</li>
+        <li>2. The real bottleneck</li>
+        <li>3. What is Triton, and why it matters</li>
+        <li>4. Choosing bug #10987</li>
+      </ol>
+    </li>
+    <li>Part II — Reproducing the bug <span class="badge b-int">Intermediate</span>
+      <ol>
+        <li>5. The toolchain and the real-world hurdles</li>
+        <li>6. The reproducer: four kernels</li>
+        <li>7. Reading the evidence</li>
+      </ol>
+    </li>
+    <li>Part III — Root-cause analysis <span class="badge b-adv">Advanced</span>
+      <ol>
+        <li>8. How a Triton kernel becomes GPU code</li>
+        <li>9. Bisecting by IR stage: the 2 → 4,128 jump</li>
+        <li>10. GPU layouts in 5 minutes</li>
+        <li>11. The smoking gun: a replicated layout</li>
+        <li>12. Which pass is guilty?</li>
+      </ol>
+    </li>
+    <li>Part IV — Fixing bug #1: the Triton bug <span class="badge b-adv">Advanced</span>
+      <ol>
+        <li>13. The decision point with a "TODO"</li>
+        <li>14. The one-idea fix</li>
+        <li>15. Why it is correct</li>
+        <li>16. Packaging: branch, patch, test, harness</li>
+      </ol>
+    </li>
+    <li>Part V — Fixing bug set #2: bugs in my own work <span class="badge b-int">Intermediate</span>
+      <ol>
+        <li>17. "Check the gaps and bugs"</li>
+        <li>18. The check that de-risked everything</li>
+        <li>19. Four bugs found and fixed</li>
+        <li>20. Honest residual risks</li>
+      </ol>
+    </li>
+    <li>Part VI — Shipping &amp; why it matters
+      <ol>
+        <li>21. Build &amp; verify on a rented GPU</li>
+        <li>22. Submitting the pull request</li>
+        <li>23. Full circle</li>
+      </ol>
+    </li>
+    <li>Appendix A — The patch</li>
+    <li>Appendix B — Glossary</li>
+  </ol>
+</section>
+
+<!-- ============ EXEC SUMMARY ============ -->
+<section class="part">
+<h2>Executive summary</h2>
+<p class="lead">This document is the full story of one focused piece of work: turning a career
+question — "what are my chances at OpenAI?" — into a concrete, verified fix for a real bug in
+Triton, the GPU compiler that OpenAI created and still maintains.</p>
+
+<p>The arc has six movements. We start with a résumé and an honest assessment. We identify the true
+bottleneck — a lack of <em>verifiable public work</em> — and pick a bug that puts that work directly
+in front of the people who would hire her. We reproduce the bug, dig down through the compiler until
+we find the exact mechanism, write a fix, and then — critically — turn the same skeptical eye on our
+own fix and find and repair the bugs hiding in <em>that</em>.</p>
+
+<div class="callout key">
+  <span class="t">The result in one line</span>
+  A chained floating-point division feeding a reduction made Triton emit <b>4,128</b> hardware
+  divide instructions where <b>~64</b> were needed. The cause is a single layout decision in one
+  compiler pass. The fix is a ~20-line, principled change with a regression test — sitting on a
+  branch, as a clean patch, ready to build and open as a pull request.
+</div>
+
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Issue</td><td><code>triton-lang/triton #10987</code></td></tr>
+  <tr><td>Symptom</td><td>Trivial kernel → ~24,000 lines of PTX, ~25&nbsp;s in <code>ptxas</code>, 4,128 <code>div.full.f32</code></td></tr>
+  <tr><td>Root cause</td><td>A replicated <code>#linear</code> layout chosen for an elementwise op in the <code>RemoveLayoutConversions</code> pass</td></tr>
+  <tr><td>Fix</td><td>Break layout-conflict ties toward the least-replicated candidate (fewest elements/thread)</td></tr>
+  <tr><td>Branch / commit</td><td><code>fix/10987-elementwise-replicated-layout</code> &nbsp;·&nbsp; <code>fa1dca9</code></td></tr>
+  <tr><td>Predicted effect</td><td>kernel B: 4,128 → <b>~64</b> divisions</td></tr>
+</table>
+
+<p class="small">Everything below is written so a motivated beginner can follow it end to end, while an
+experienced compiler engineer can still find the precise IR, the exact pass, and the reasoning that
+pins the diagnosis. Difficulty badges mark the on-ramps and the deep ends.</p>
+</section>
+
+<!-- ============ PART I ============ -->
+<section class="part">
+<h2>Part I — The big picture <span class="badge b-beg">Beginner</span></h2>
+
+<h3>1. It started with a résumé</h3>
+<p>The project began with a simple ask: <em>"Here's my résumé — what are my chances of getting into
+OpenAI?"</em> The résumé was strong and unusually well-targeted at LLM-inference infrastructure:
+CUDA and Triton kernels, KV-cache quantization, speculative decoding, tensor parallelism. But an
+honest assessment surfaced three hard truths that no amount of polish could hide:</p>
+<ul>
+  <li>Under a year of full-time engineering experience.</li>
+  <li>No brand-name employer to act as a credential shortcut.</li>
+  <li>Open-source contributions that were <em>"open, under review"</em> — not merged, not yet proof.</li>
+</ul>
+<p>OpenAI is one of the hardest places in the industry to be hired. A cold résumé with those three
+gaps is usually filtered out before a human reads the good parts.</p>
+
+<h3>2. The real bottleneck</h3>
+<div class="callout beg">
+  <span class="t">Beginner note — what a "bottleneck" is here</span>
+  Years-of-experience and a famous employer are just <em>proxies</em> a reviewer uses to answer one
+  question: "can this person do elite work?" If you cannot offer the proxies, the only way through
+  is to make them irrelevant — with public, verifiable, hard work in the exact domain the employer
+  cares about.
+</div>
+<p>So the bottleneck was reframed. Not "get more experience" (slow, uncontrollable) but: <b>produce
+undeniable public evidence of skill, where OpenAI engineers will see it.</b> The sharpest possible
+venue for that is Triton itself.</p>
+
+<h3>3. What is Triton, and why it matters</h3>
+<div class="callout beg">
+  <span class="t">Beginner note — the vocabulary</span>
+  A <b>GPU</b> runs thousands of tiny threads in parallel. A <b>kernel</b> is one small program those
+  threads run. Writing fast kernels in raw CUDA is hard, so <b>Triton</b> is a language + compiler
+  that lets you write kernels in Python-like code and compiles them to GPU machine code. Triton was
+  created at <b>OpenAI</b> and is still led by OpenAI engineers. <b>vLLM</b> is a popular library that
+  serves large language models fast, and leans on kernels like these.
+</div>
+<p>Because Triton is OpenAI's own project, a genuinely useful, <em>merged</em> fix to Triton is about
+the most direct signal a candidate can send. It lands in the commit history that OpenAI engineers
+read and review. That is why, of all the possible open-source targets, Triton was the bullseye.</p>
+
+<h3>4. Choosing bug #10987</h3>
+<p>Scanning Triton's open issues for something meaty but tractable surfaced
+<code>#10987</code>, titled — almost unbelievably — <em>"Triton generates pathologically large PTX
+for chained fp32 division-by-broadcast feeding a reduction."</em> In plain terms: a <em>trivial</em>
+kernel was compiling into eleven thousand lines of low-level code and taking thirteen seconds to
+assemble. Something was very wrong, the report was crisp, and nobody had claimed it.</p>
+<div class="callout key">
+  <span class="t">Why this bug was the right pick</span>
+  It lives in Triton (maximum signal), it is a real correctness-adjacent performance bug (not a typo
+  fix), it was precisely reported with a reproducer, and — as we will see — it turned out to be
+  <em>verifiable without owning an expensive GPU</em>, which matched the constraints exactly.
+</div>
+</section>
+
+<!-- ============ PART II ============ -->
+<section class="part">
+<h2>Part II — Reproducing the bug <span class="badge b-int">Intermediate</span></h2>
+
+<h3>5. The toolchain and the real-world hurdles</h3>
+<p>Before you can fix a bug you must make it happen on your own machine, on demand. This is where real
+engineering — as opposed to the tidy version in tutorials — actually lives. The environment was a
+Windows 11 laptop with a small NVIDIA T1000 GPU. The road there had three genuine potholes, each
+worth remembering:</p>
+
+<div class="callout bug">
+  <span class="t">Hurdle 1 — Triton would not even import on Windows</span>
+  Installing Triton for Windows produced <code>ImportError: DLL load failed while importing
+  libtriton: A dynamic link library (DLL) initialization routine failed.</code> This happened on
+  <em>two</em> different versions — the tell-tale sign of an environment-level incompatibility between
+  Triton's bundled LLVM and the installed PyTorch, not a version mismatch that swapping would fix.
+</div>
+
+<div class="callout bug">
+  <span class="t">Hurdle 2 — the shell kept mangling commands</span>
+  Commands sent from PowerShell into WSL kept dying after the first line. The cause was subtle:
+  PowerShell was intercepting <code>$(...)</code> command-substitution and inner double-quotes before
+  they reached <code>bash</code>. The fix was discipline: bare commands only, and put anything
+  complex into a real <code>.py</code> file that Python reads directly.
+</div>
+
+<div class="callout fix">
+  <span class="t">The solution — go native, and go torch-free</span>
+  Windows Subsystem for Linux (WSL2) had working GPU pass-through, the system <code>ptxas</code>
+  assembler, and Python. Installing the <em>real</em> Linux Triton (<code>triton 3.7.1</code>) there
+  gave the exact upstream environment. And because this bug is a pure <em>code-generation</em> bug,
+  it can be reproduced with <b>ahead-of-time compilation only</b> — no GPU launch, no PyTorch, no
+  expensive hardware. Compile the kernel, read the generated code, count instructions.
+</div>
+
+<h3>6. The reproducer: four kernels</h3>
+<p>The issue author supplied a beautiful minimal reproducer: four nearly-identical kernels that
+isolate the trigger by changing one thing at a time. All operate on a small
+<code>16&nbsp;×&nbsp;256</code> tile of 32-bit floats. <code>s</code> is a per-row scalar (the sum of
+each row), broadcast back across the row.</p>
+<table>
+  <tr><th>Kernel</th><th>What it computes</th><th>Purpose</th></tr>
+  <tr><td><b>A</b></td><td><code>y = x / s</code>, then reduce</td><td>a single division, then a sum — the control</td></tr>
+  <tr><td><b>B</b></td><td><code>y = x / s; w = y / s</code>, then reduce</td><td>the <em>chained</em> division — the bug</td></tr>
+  <tr><td><b>C</b></td><td><code>y = x / s; w = y / s</code>, <em>no</em> reduce</td><td>chained division, but nothing consumes it</td></tr>
+  <tr><td><b>D</b></td><td><code>r = 1/s; y = x*r; w = y*r</code>, then reduce</td><td>the reciprocal work-around</td></tr>
+</table>
+<p>The scientific method in miniature: A vs B isolates "chained division," B vs C isolates "feeds a
+reduction," and D shows a work-around. Both conditions — a chained division <em>and</em> a following
+reduction — are required to trigger the blow-up.</p>
+
+<p class="lang">python — the essence of the reproducer</p>
+<pre><span class="c"># build kernel B, compile ahead-of-time for sm_90, count the divides in the PTX</span>
+<span class="k">def</span> compile_div_count(body, cap=90):
+    ... <span class="c"># assemble a @triton.jit kernel from `body`</span>
+    cc = triton.compile(source, target=GPUTarget(<span class="s">"cuda"</span>, cap, 32),
+                        options={<span class="s">"num_warps"</span>: 4})
+    <span class="k">return</span> cc.asm[<span class="s">"ptx"</span>].count(<span class="s">"div.full.f32"</span>)   <span class="c"># the hardware FP32 divide</span></pre>
+
+<h3>7. Reading the evidence</h3>
+<div class="callout beg">
+  <span class="t">Beginner note — PTX and <code>div.full.f32</code></span>
+  <b>PTX</b> is the assembly-like language a GPU kernel is compiled to; <b>ptxas</b> turns PTX into
+  final machine code. <code>div.full.f32</code> is the PTX instruction for one full-precision 32-bit
+  float division. Counting how many appear tells us how much redundant work the compiler emitted.
+</div>
+<p>Compiling all four kernels and counting produced a table that makes the bug impossible to miss —
+and it reproduced faithfully on the latest release (3.7.1), on two different GPU architectures:</p>
+<table>
+  <tr><th>Kernel</th><th class="n">PTX lines</th><th class="n"><code>div.full.f32</code></th><th class="n">compile time</th></tr>
+  <tr><td>A — single div → reduce</td><td class="n">1,777</td><td class="n">32</td><td class="n">0.1&nbsp;s</td></tr>
+  <tr style="background:#fdecea;"><td><b>B — chained div → reduce</b></td><td class="n"><b>24,062</b></td><td class="n"><b>4,128</b></td><td class="n">~25&nbsp;s</td></tr>
+  <tr><td>C — chained, no reduce</td><td class="n">1,206</td><td class="n">64</td><td class="n">0.1&nbsp;s</td></tr>
+  <tr><td>D — reciprocal work-around</td><td class="n">13,695</td><td class="n">16</td><td class="n">10&nbsp;s</td></tr>
+</table>
+<p class="kfig">Kernel B does barely more arithmetic than A or C, yet emits <b>~65× more divisions</b>.</p>
+<div class="callout key">
+  <span class="t">Why the reproduction is trustworthy</span>
+  The <code>div.full.f32</code> counts for A (32) and C (64) matched the original report <em>exactly</em>,
+  which proves the setup is faithful rather than coincidental. And reproducing on the newest release,
+  3.7.1, made the finding stronger than the original report: the bug is still live.
+</div>
+</section>
+
+<!-- ============ PART III ============ -->
+<section class="part">
+<h2>Part III — Root-cause analysis <span class="badge b-adv">Advanced</span></h2>
+
+<h3>8. How a Triton kernel becomes GPU code</h3>
+<div class="callout beg">
+  <span class="t">Beginner note — a compiler is a pipeline</span>
+  Your kernel is lowered through a series of intermediate representations (IRs), each closer to the
+  metal. Every arrow is a set of "passes" that rewrite the program. To find a bug you ask: at which
+  arrow did things go wrong?
+</div>
+<div class="diagram">
+  <div class="flow">
+    <div class="stage"><b>TTIR</b><span class="sm">Triton IR<br>(your code, typed)</span></div>
+    <div class="arrow">→</div>
+    <div class="stage"><b>TTGIR</b><span class="sm">Triton-GPU IR<br>(+ layouts)</span></div>
+    <div class="arrow">→</div>
+    <div class="stage hot"><b>LLVM IR</b><span class="sm">scalar, per-thread</span></div>
+    <div class="arrow">→</div>
+    <div class="stage hot"><b>PTX</b><span class="sm">GPU assembly</span></div>
+    <div class="arrow">→</div>
+    <div class="stage"><b>SASS</b><span class="sm">machine code</span></div>
+  </div>
+</div>
+<p>The single most useful idea in the whole investigation is that each stage's text can be dumped and
+inspected. If we count divisions at every stage, the stage where the count explodes tells us which
+arrow — which set of passes — introduced the problem.</p>
+
+<h3>9. Bisecting by IR stage: the 2 → 4,128 jump</h3>
+<p>The MLIR-level division operation is <code>arith.divf</code> on a whole tensor; the PTX-level one
+is <code>div.full.f32</code> per element. Counting both across the stages for kernel B:</p>
+<table>
+  <tr><th>Stage</th><th class="n">lines</th><th class="n"><code>arith.divf</code></th><th class="n"><code>div.full.f32</code></th></tr>
+  <tr><td>TTIR</td><td class="n">86</td><td class="n">2</td><td class="n">0</td></tr>
+  <tr><td>TTGIR</td><td class="n">88</td><td class="n">2</td><td class="n">0</td></tr>
+  <tr><td>LLVM IR</td><td class="n">22,441</td><td class="n">0</td><td class="n">0</td></tr>
+  <tr style="background:#fdecea;"><td>PTX</td><td class="n">24,018</td><td class="n">0</td><td class="n"><b>4,128</b></td></tr>
+</table>
+<div class="callout key">
+  <span class="t">The decisive clue</span>
+  The division count is <b>exactly 2</b> all the way through TTGIR — the Triton-GPU IR is pristine,
+  just two tensor-level divisions. The explosion to thousands happens only when TTGIR is lowered to
+  LLVM/PTX. So the divisions are fine; the <em>layout</em> the second division is computed in is not.
+</div>
+
+<h3>10. GPU layouts in 5 minutes</h3>
+<div class="callout beg">
+  <span class="t">Beginner note — threads, warps, and "elements per thread"</span>
+  A GPU groups threads into <b>warps</b> of 32. A tensor spread over the GPU needs a <b>layout</b>:
+  a rule saying which thread holds which element. If a <code>16×256</code> tile (4,096 elements) is
+  spread evenly over 128 threads, each thread holds <b>32</b> elements — and the compiler emits the
+  math 32 times per thread. If instead the layout makes <em>every</em> thread hold <em>all</em> 4,096
+  elements, the math is emitted 4,096 times. Same result, 128× the work.
+</div>
+<p>Triton has several layout kinds. Two matter here:</p>
+<ul>
+  <li><b><code>#blocked</code></b> — a healthy, <em>distributed</em> layout: the 256 columns are spread
+    across the 32 lanes of a warp and 4 warps. Each thread holds ~32 elements.</li>
+  <li><b><code>#linear</code></b> — a general layout defined by "basis vectors." When its per-lane and
+    per-warp basis vectors are all zero, it means the data does <em>not</em> move as you change lane or
+    warp — i.e., it is <b>replicated</b> across every lane and warp.</li>
+</ul>
+
+<h3>11. The smoking gun: a replicated layout</h3>
+<p>Dumping the pristine TTGIR for kernel B shows the two divisions living in <em>different</em>
+layouts, with a layout conversion between them:</p>
+<p class="lang">TTGIR — trimmed to the essential lines</p>
+<pre><span class="c">#blocked = sizePerThread=[1,1], threadsPerWarp=[1,32], warpsPerCTA=[1,4]   // distributed</span>
+<span class="c">#linear  = register=[[1,0],[2,0],[4,0],[8,0]], lane=[[0,0]x5], warp=[[0,0]x2]  // lane/warp ALL zero</span>
+
+%y_11 = arith.divf %x_7,  %y_9  : tensor&lt;16x256xf32, <span class="k">#blocked</span>&gt;   <span class="c">// 1st div: distributed  → 32</span>
+%y_12 = ttg.convert_layout %y_11 : <span class="k">#blocked</span> -&gt; <span class="k">#linear</span>
+%w    = arith.divf %y_12, %y_10 : tensor&lt;16x256xf32, <span class="k">#linear</span>&gt;    <span class="c">// 2nd div: REPLICATED → blows up</span></pre>
+<p>Every <code>lane</code> and <code>warp</code> basis of that <code>#linear</code> layout is
+<code>[0,0]</code>. The <code>16×256</code> tensor is replicated across all 32 lanes × 4 warps, so
+each thread materializes the whole tensor. The arithmetic closes the case:</p>
+<div class="callout key">
+  <span class="t">The numbers that pin the diagnosis</span>
+  Kernel A (one division in <code>#blocked</code>) emits <b>32</b>. Kernel B emits <b>4,128 = 32 +
+  4,096</b>. That is: the first division in <code>#blocked</code> costs 32, and the second division in
+  the replicated <code>#linear</code> costs <b>4,096</b> — every one of the 4,096 elements, on every
+  thread. The theory predicts the exact observed number.
+</div>
+<p>This also explains the other kernels: <b>C</b> has no trailing reduction, so nothing forces the
+<code>#linear</code> layout and <code>w</code> stays distributed. <b>D</b> does its division once on
+the tiny <code>16×1</code> tensor before broadcasting, so only 16 divisions survive.</p>
+
+<h3>12. Which pass is guilty?</h3>
+<p>Knowing the <em>stage</em> (TTGIR → LLVM) is not enough; dozens of passes run there. Turning on
+Triton's per-pass IR dump and tracking when <code>w</code> first becomes <code>#linear</code> pinned
+it to a single pass — <code>TritonGPURemoveLayoutConversions</code>. The proof is in its before/after:</p>
+<table>
+  <tr><th>At that pass</th><th>Layout of the two divisions</th></tr>
+  <tr><td><b>Input</b> (before)</td><td>both <code>arith.divf</code> in <code>#blocked</code> — healthy</td></tr>
+  <tr style="background:#fdecea;"><td><b>Output</b> (after)</td><td>the second <code>divf</code> rewritten into replicated <code>#linear</code></td></tr>
+</table>
+<div class="callout key">
+  <span class="t">The pass took good code and made it bad</span>
+  The IR entering the pass had both divisions safely in <code>#blocked</code>. The pass itself pushed
+  the second division into the replicated <code>#linear</code>. That is the exact place a fix must live.
+</div>
+</section>
+
+<!-- ============ PART IV ============ -->
+<section class="part">
+<h2>Part IV — Fixing bug #1: the Triton bug <span class="badge b-adv">Advanced</span></h2>
+
+<h3>13. The decision point with a "TODO"</h3>
+<p>The pass has two halves: a <em>forward</em> phase that assigns each operation a layout, and a
+<em>backward</em> phase that shuffles conversions around to remove them. When an operation could take
+several layouts, the forward phase must pick one. That tie-breaker is a function literally named for
+its own shortcoming:</p>
+<p class="lang">C++ — the original tie-breaker in resolveConflicts()</p>
+<pre><span class="c">// Hacky resolve, prefer block encoding.</span>
+<span class="c">// TODO: add a proper heuristic.</span>
+Attribute encoding = *info.encodings.begin();        <span class="c">// the ARBITRARY first candidate</span>
+<span class="k">bool</span> isLoadOrStore = op &amp;&amp; isa&lt;LoadOp, StoreOp, ...&gt;(op);
+<span class="k">for</span> (Attribute e : info.encodings) {
+  <span class="k">if</span> ((isLoadOrStore &amp;&amp; isa&lt;BlockedEncodingAttr&gt;(e)) ||
+      (!isLoadOrStore &amp;&amp; isa&lt;MmaEncodingTrait&gt;(e))) { encoding = e; <span class="k">break</span>; }
+}</pre>
+<p>The comment says "prefer block encoding," but the code only does so for memory operations. For an
+ordinary <code>arith.divf</code>, neither branch fires and it keeps the <b>arbitrary first
+candidate</b> — which, by iteration order, happened to be the replicated <code>#linear</code>. That
+arbitrary choice is the bug.</p>
+
+<h3>14. The one-idea fix</h3>
+<div class="callout fix">
+  <span class="t">The fix, in one sentence</span>
+  When no memory/matmul preference applies, don't pick arbitrarily — pick the candidate layout with
+  the <b>fewest elements per thread</b> (the least-replicated, most-distributed one).
+</div>
+<p>Better still, the codebase already contained the exact tool needed:
+<code>getUniqueElemsPerThread(encoding, shape)</code> returns how many elements a thread materializes
+in a given layout. The patch simply uses it as the tie-breaker:</p>
+<p class="lang">C++ — the added heuristic (abridged)</p>
+<pre><span class="k">if</span> (!foundPreferred) {
+  <span class="k">if</span> (<span class="k">auto</span> tensorTy = dyn_cast&lt;RankedTensorType&gt;(it.first.getType())) {
+    <span class="k">auto</span> shape = tensorTy.getShape();
+    <span class="k">unsigned</span> bestElems = getUniqueElemsPerThread(encoding, shape);
+    <span class="k">for</span> (Attribute e : info.encodings) {
+      <span class="k">unsigned</span> elems = getUniqueElemsPerThread(e, shape);
+      <span class="k">if</span> (elems &lt; bestElems) { bestElems = elems; encoding = e; }  <span class="c">// prefer least-replicated</span>
+    }
+  }
+}</pre>
+<p>For kernel B this compares <code>#blocked</code> (32 elements/thread) against <code>#linear</code>
+(4,096) and correctly keeps <code>#blocked</code>. The second division stays distributed, and kernel
+B drops from 4,128 divisions to ~64 — matching kernel C.</p>
+
+<h3>15. Why it is correct</h3>
+<p>Three independent arguments support the fix:</p>
+<ol>
+  <li><b>It only changes arbitrary choices.</b> The new code runs solely in the branch that previously
+    took "the first candidate" with no real reason. It cannot regress the deliberate memory/matmul cases.</li>
+  <li><b>The arithmetic predicts the outcome.</b> <code>getUniqueElemsPerThread</code> returns 32 for
+    <code>#blocked</code> and 4,096 for <code>#linear</code>, exactly reproducing the observed 32 + 4,096.</li>
+  <li><b>A cross-check from the other half of the pass.</b> The <em>backward</em> phase already contains
+    the same elements-per-thread cost guard, so it would never have created this inflation. That the
+    inflation happens anyway means it came from the <em>forward</em> phase — precisely the code we patched.</li>
+</ol>
+<div class="callout key">
+  <span class="t">Confidence, honestly stated</span>
+  These three arguments raised confidence that the fix targets the right function from roughly a coin
+  flip to about <b>85%</b> — high, for a compiler change that has not yet been compiled. The remaining
+  uncertainty is exactly the kind only a real build can settle.
+</div>
+
+<h3>16. Packaging: branch, patch, test, harness</h3>
+<p>A fix is only useful if it can be built, verified, and reviewed. The work was packaged as:</p>
+<ul>
+  <li>a git branch <code>fix/10987-elementwise-replicated-layout</code> (commit <code>fa1dca9</code>);</li>
+  <li>a portable <code>10987-fix.patch</code>, verified to apply cleanly to fresh <code>main</code>;</li>
+  <li>a regression test that asserts kernel B stays under 128 divisions (it was 4,128);</li>
+  <li>a one-command build-and-test harness for a Linux GPU box.</li>
+</ul>
+</section>
+
+<!-- ============ PART V ============ -->
+<section class="part">
+<h2>Part V — Fixing bug set #2: bugs in my own work <span class="badge b-int">Intermediate</span></h2>
+<p class="lead">Writing the fix was only half the job. The instruction that followed — "check the gaps
+and bugs" — turned the same skeptical eye on the deliverables themselves. This is the part most people
+skip, and it is where a lot of real bugs live.</p>
+
+<h3>17. "Check the gaps and bugs"</h3>
+<p>The single biggest risk was an <em>assumption</em>: that <code>resolveConflicts</code> was even the
+right place. If the replicated layout were baked in earlier — by the reshape or reduction layout
+inference — the patch would be a no-op. That question had to be answered <em>before</em> spending money
+renting a GPU to build.</p>
+
+<h3>18. The check that de-risked everything</h3>
+<p>Rather than guess, the installed Triton's per-pass IR dump was used to watch exactly when
+<code>w</code> becomes <code>#linear</code>. It became <code>#linear</code> on the output of
+<code>TritonGPURemoveLayoutConversions</code> — the patched pass — with clean <code>#blocked</code>
+input. Combined with the backward-phase cross-check, this confirmed the patch is in the right pass
+without compiling anything.</p>
+
+<h3>19. Four bugs found and fixed</h3>
+<table>
+  <tr><th>#</th><th>Bug in the deliverables</th><th>Fix applied</th></tr>
+  <tr>
+    <td>1</td>
+    <td>The build script never installed a C++ compiler or Python headers — a fresh rented box would
+        fail to build Triton at all.</td>
+    <td>Added a conditional <code>apt-get install build-essential python3-dev</code>.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>No <em>baseline</em>: the test could pass vacuously if <code>main</code> behaved differently
+        from the analyzed 3.7.1.</td>
+    <td>Rewrote the procedure to build <code>main</code> first, confirm the bug (B ≈ 4,128), <em>then</em>
+        apply the patch and confirm the fix.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>The unit test was left as "write it yourself later" — a real gap for a pull request.</td>
+    <td>Wrote a proper MLIR lit test from the <em>real captured pre-pass IR</em> and committed it to the branch.</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>The C++ named a type (<code>ArrayRef&lt;int64_t&gt;</code>) that carried a small namespace risk.</td>
+    <td>Changed it to <code>auto</code> — same behavior, zero risk.</td>
+  </tr>
+</table>
+
+<h3>20. Honest residual risks</h3>
+<div class="callout warn">
+  <span class="t">What a build still needs to confirm</span>
+  <ul style="margin:4px 0 0;">
+    <li>~15% chance the fix is the right <em>pass</em> but the wrong <em>function</em> within it
+      (forward vs. backward phase). Ordered fallbacks are documented.</li>
+    <li>The analysis was on 3.7.1; the patch targets <code>main</code>. The baseline-first procedure is
+      the guard against drift.</li>
+    <li>The lit test's exact syntax may need a small tweak on <code>main</code>.</li>
+    <li>The heuristic touches a central pass; the existing test suite is the regression guard.</li>
+  </ul>
+</div>
+<p>Stating these plainly is not weakness — it is what separates an honest engineering hand-off from an
+over-sold one. Every risk has a documented check or fallback.</p>
+</section>
+
+<!-- ============ PART VI ============ -->
+<section class="part">
+<h2>Part VI — Shipping &amp; why it matters</h2>
+
+<h3>21. Build &amp; verify on a rented GPU</h3>
+<p>The whole package is designed so the first run on a rented GPU box (an RTX 4090) is decisive. The
+procedure builds unpatched <code>main</code> first to prove the bug is present, then applies the
+one-file patch and rebuilds incrementally (minutes, not the full 30–40), then runs the regression test.</p>
+<p class="lang">bash — the decisive before/after</p>
+<pre>python3 test_10987_div_blowup.py   <span class="c"># baseline (main):  B ~4128  → FAIL, bug present</span>
+git apply 10987-fix.patch
+python3 -m pip install -e .        <span class="c"># incremental rebuild (1 file changed)</span>
+python3 test_10987_div_blowup.py   <span class="c"># patched:         B  <128  → PASS</span></pre>
+
+<h3>22. Submitting the pull request</h3>
+<p>With the test green, the branch is pushed to a fork and a pull request is opened against
+<code>triton-lang/triton:main</code>, referencing <code>Fixes #10987</code> and carrying the root-cause
+write-up and the numbers. A merged compiler fix here is worth more, as a hiring signal, than any
+number of résumé edits.</p>
+
+<h3>23. Full circle</h3>
+<div class="callout key">
+  <span class="t">Back to the original question</span>
+  The project began with "what are my chances at OpenAI?" and ends with a concrete, verified,
+  ready-to-submit fix to OpenAI's own compiler — the exact kind of public, verifiable, elite-domain
+  work that the honest assessment identified as the one thing capable of moving the needle. The
+  bottleneck was never "more experience." It was "undeniable proof." This is that proof, built end to end.
+</div>
+
+<h3>How the bugs were fixed — the short version</h3>
+<p>There were two kinds of bug in this project, and both were fixed the same disciplined way:
+<b>reproduce → bisect to the exact mechanism → change the smallest correct thing → prove it.</b></p>
+<ul>
+  <li><b>The Triton bug (#10987)</b> was fixed by tracing a 65× code blow-up to a single arbitrary
+    layout choice in one compiler pass, and replacing that arbitrary choice with a principled one
+    (prefer the least-replicated layout), backed by the code's own existing cost function.</li>
+  <li><b>The bugs in my own deliverables</b> were fixed by refusing to trust the fix — verifying the
+    target pass with an IR dump, hardening the build script, adding a real baseline and a real test,
+    and writing down every remaining risk with its check.</li>
+</ul>
+</section>
+
+<!-- ============ APPENDIX A ============ -->
+<section class="part">
+<h2>Appendix A — The patch</h2>
+<p>The complete change to <code>lib/Dialect/TritonGPU/Transforms/RemoveLayoutConversions.cpp</code>,
+in <code>LayoutPropagation::resolveConflicts()</code>. It leaves the existing memory/matmul
+preferences untouched and only replaces the previously-arbitrary tie-break.</p>
+<p class="lang">C++ — the added block, with its explanatory comment</p>
+<pre><span class="k">bool</span> foundPreferred = <span class="k">false</span>;
+<span class="k">for</span> (Attribute e : info.encodings) {
+  <span class="k">if</span> ((isLoadOrStore &amp;&amp; isa&lt;BlockedEncodingAttr&gt;(e)) ||
+      (!isLoadOrStore &amp;&amp; isa&lt;MmaEncodingTrait&gt;(e))) {
+    encoding = e; foundPreferred = <span class="k">true</span>; <span class="k">break</span>;
+  }
+}
+<span class="c">// issue #10987: when no memory/MMA preference applies, the choice above is</span>
+<span class="c">// just the arbitrary first candidate. That can be a replicated layout (e.g.</span>
+<span class="c">// a linear layout whose lane/warp bases are all zero), in which every</span>
+<span class="c">// thread materializes the full tensor. Lowering an elementwise op in such a</span>
+<span class="c">// layout emits it once per redundant copy (a chained `x / s / s` feeding a</span>
+<span class="c">// reduce blew up from ~64 to 4128 `div.full.f32`). Break the tie toward the</span>
+<span class="c">// least-replicated candidate: the one with the fewest elements per thread.</span>
+<span class="k">if</span> (!foundPreferred) {
+  <span class="k">if</span> (<span class="k">auto</span> tensorTy = dyn_cast&lt;RankedTensorType&gt;(it.first.getType())) {
+    <span class="k">auto</span> shape = tensorTy.getShape();
+    <span class="k">unsigned</span> bestElems = getUniqueElemsPerThread(encoding, shape);
+    <span class="k">for</span> (Attribute e : info.encodings) {
+      <span class="k">unsigned</span> elems = getUniqueElemsPerThread(e, shape);
+      <span class="k">if</span> (elems &lt; bestElems) { bestElems = elems; encoding = e; }
+    }
+  }
+}</pre>
+
+<h2 style="margin-top:26px;">Appendix B — Glossary</h2>
+<table>
+  <tr><th>Term</th><th>Plain-language meaning</th></tr>
+  <tr><td><b>Kernel</b></td><td>A small program run in parallel by thousands of GPU threads.</td></tr>
+  <tr><td><b>Triton</b></td><td>A Python-like language + compiler for GPU kernels, created at OpenAI.</td></tr>
+  <tr><td><b>PTX / ptxas</b></td><td>GPU assembly language, and the tool that assembles it to machine code.</td></tr>
+  <tr><td><b><code>div.full.f32</code></b></td><td>One full-precision 32-bit floating-point division in PTX.</td></tr>
+  <tr><td><b>Warp</b></td><td>A group of 32 GPU threads that execute together.</td></tr>
+  <tr><td><b>Layout</b></td><td>The rule mapping which thread holds which element of a tensor.</td></tr>
+  <tr><td><b>Elements per thread</b></td><td>How many elements each thread materializes — the cost multiplier.</td></tr>
+  <tr><td><b>Replicated layout</b></td><td>A layout where every thread holds the whole tensor (maximally wasteful).</td></tr>
+  <tr><td><b>TTIR / TTGIR</b></td><td>Triton's high-level IR, and its GPU-level IR that carries layouts.</td></tr>
+  <tr><td><b>Reduction</b></td><td>Collapsing a tensor along an axis, e.g. summing each row.</td></tr>
+  <tr><td><b>Pass</b></td><td>One transformation step inside the compiler pipeline.</td></tr>
+  <tr><td><b>Pull request (PR)</b></td><td>A proposed change submitted to an open-source project for review.</td></tr>
+</table>
+<p class="small" style="margin-top:18px; text-align:center;">End of document · triton-lang/triton #10987 · Reproduce → Bisect → Fix → Verify</p>
+</section>
+
+</body>
+</html>

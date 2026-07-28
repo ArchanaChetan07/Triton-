@@ -1,0 +1,123 @@
+﻿From fa1dca962e7def8cbb9ca3e8d6e30ddab4233efe Mon Sep 17 00:00:00 2001
+From: ArchanaChetan07 <apatil@sandiego.edu>
+Date: Thu, 23 Jul 2026 10:56:44 -0700
+Subject: [PATCH] [TritonGPU] Prefer least-replicated layout when resolving
+ elementwise layout conflicts
+
+LayoutPropagation::resolveConflicts only preferred a blocked encoding for load/store ops; for any other op (e.g. arith.divf) it kept the arbitrary first candidate. When one candidate is a replicated layout (a linear layout whose lane/warp bases are all zero, in which every thread materializes the whole tensor), an elementwise op is lowered once per redundant copy.
+
+A chained 'x / s / s' feeding a reduction thus emitted 4128 div.full.f32 (24k PTX lines, ~25s ptxas) instead of ~64. Break the tie toward the candidate with the fewest elements per thread (the most distributed layout), using the existing getUniqueElemsPerThread helper.
+
+Fixes #10987
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ .../Transforms/RemoveLayoutConversions.cpp    | 23 ++++++++
+ .../remove-layout-conversions-10987.mlir      | 54 +++++++++++++++++++
+ 2 files changed, 77 insertions(+)
+ create mode 100644 test/TritonGPU/remove-layout-conversions-10987.mlir
+
+diff --git a/lib/Dialect/TritonGPU/Transforms/RemoveLayoutConversions.cpp b/lib/Dialect/TritonGPU/Transforms/RemoveLayoutConversions.cpp
+index 18dbb09..475abf3 100644
+--- a/lib/Dialect/TritonGPU/Transforms/RemoveLayoutConversions.cpp
++++ b/lib/Dialect/TritonGPU/Transforms/RemoveLayoutConversions.cpp
+@@ -389,13 +389,36 @@ void LayoutPropagation::resolveConflicts() {
+     Attribute encoding = *info.encodings.begin();
+     bool isLoadOrStore =
+         op && isa<LoadOp, StoreOp, AtomicRMWOp, AtomicCASOp>(op);
++    bool foundPreferred = false;
+     for (Attribute e : info.encodings) {
+       if ((isLoadOrStore && isa<BlockedEncodingAttr>(e)) ||
+           (!isLoadOrStore && isa<MmaEncodingTrait>(e))) {
+         encoding = e;
++        foundPreferred = true;
+         break;
+       }
+     }
++    // issue #10987: when no memory/MMA preference applies, the choice above is
++    // just the arbitrary first candidate. That can be a replicated layout (e.g.
++    // a linear layout whose lane/warp bases are all zero), in which every
++    // thread materializes the full tensor. Lowering an elementwise op in such a
++    // layout emits it once per redundant copy (a chained `x / s / s` feeding a
++    // reduce blew up from ~64 to 4128 `div.full.f32`). Break the tie toward the
++    // least-replicated candidate: the one with the fewest elements per thread,
++    // i.e. the most distributed layout.
++    if (!foundPreferred) {
++      if (auto tensorTy = dyn_cast<RankedTensorType>(it.first.getType())) {
++        auto shape = tensorTy.getShape();
++        unsigned bestElems = getUniqueElemsPerThread(encoding, shape);
++        for (Attribute e : info.encodings) {
++          unsigned elems = getUniqueElemsPerThread(e, shape);
++          if (elems < bestElems) {
++            bestElems = elems;
++            encoding = e;
++          }
++        }
++      }
++    }
+     info.encodings.clear();
+     info.encodings.insert(encoding);
+   }
+diff --git a/test/TritonGPU/remove-layout-conversions-10987.mlir b/test/TritonGPU/remove-layout-conversions-10987.mlir
+new file mode 100644
+index 0000000..d92c1be
+--- /dev/null
++++ b/test/TritonGPU/remove-layout-conversions-10987.mlir
+@@ -0,0 +1,54 @@
++// RUN: triton-opt %s -split-input-file -tritongpu-remove-layout-conversions -cse | FileCheck %s
++
++// Regression test for issue #10987. The input is the real IR that enters
++// remove-layout-conversions for a chained `x / s / s` feeding a reduction
++// (both divisions in the distributed #blocked layout). The pass must NOT push
++// the second division into the replicated #linear layout (lane/warp bases all
++// zero), which materializes the whole tensor per thread and blows up codegen
++// (4128 div.full.f32 instead of ~64).
++
++#blocked = #ttg.blocked<{sizePerThread = [1, 1], threadsPerWarp = [1, 32], warpsPerCTA = [1, 4], order = [1, 0]}>
++#linear = #ttg.linear<{register = [[1, 0], [2, 0], [4, 0], [8, 0]], lane = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], warp = [[0, 0], [0, 0]], block = []}>
++module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 4 : i32, ttg.target = "cuda:90", "ttg.threads-per-warp" = 32 : i32} {
++  // CHECK-LABEL: @chained_div_reduce
++  // CHECK-NOT: arith.divf{{.*}}#linear
++  tt.func public @chained_div_reduce(%a: !tt.ptr<f32>, %out: !tt.ptr<f32>) {
++    %cst = arith.constant dense<256> : tensor<16x1xi32, #blocked>
++    %i0 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32, #ttg.slice<{dim = 1, parent = #blocked}>>
++    %i0_0 = tt.expand_dims %i0 {axis = 1 : i32} : tensor<16xi32, #ttg.slice<{dim = 1, parent = #blocked}>> -> tensor<16x1xi32, #blocked>
++    %i1 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32, #ttg.slice<{dim = 0, parent = #blocked}>>
++    %i1_1 = tt.expand_dims %i1 {axis = 0 : i32} : tensor<256xi32, #ttg.slice<{dim = 0, parent = #blocked}>> -> tensor<1x256xi32, #blocked>
++    %x = arith.muli %i0_0, %cst : tensor<16x1xi32, #blocked>
++    %x_2 = tt.splat %a : !tt.ptr<f32> -> tensor<16x1x!tt.ptr<f32>, #blocked>
++    %x_3 = tt.addptr %x_2, %x : tensor<16x1x!tt.ptr<f32>, #blocked>, tensor<16x1xi32, #blocked>
++    %x_4 = tt.broadcast %x_3 : tensor<16x1x!tt.ptr<f32>, #blocked> -> tensor<16x256x!tt.ptr<f32>, #blocked>
++    %x_5 = tt.broadcast %i1_1 : tensor<1x256xi32, #blocked> -> tensor<16x256xi32, #blocked>
++    %x_6 = tt.addptr %x_4, %x_5 : tensor<16x256x!tt.ptr<f32>, #blocked>, tensor<16x256xi32, #blocked>
++    %x_7 = tt.load %x_6 : tensor<16x256x!tt.ptr<f32>, #blocked>
++    %s = "tt.reduce"(%x_7) <{axis = 1 : i32}> ({
++    ^bb0(%s_15: f32, %s_16: f32):
++      %s_17 = arith.addf %s_15, %s_16 : f32
++      tt.reduce.return %s_17 : f32
++    }) : (tensor<16x256xf32, #blocked>) -> tensor<16xf32, #ttg.slice<{dim = 1, parent = #blocked}>>
++    %s_8 = tt.reshape %s : tensor<16xf32, #ttg.slice<{dim = 1, parent = #blocked}>> -> tensor<16x1xf32, #linear>
++    %y = ttg.convert_layout %s_8 : tensor<16x1xf32, #linear> -> tensor<16x1xf32, #blocked>
++    %y_9 = tt.broadcast %y : tensor<16x1xf32, #blocked> -> tensor<16x256xf32, #blocked>
++    %y_10 = arith.divf %x_7, %y_9 : tensor<16x256xf32, #blocked>
++    %w = arith.divf %y_10, %y_9 : tensor<16x256xf32, #blocked>
++    %z = "tt.reduce"(%w) <{axis = 1 : i32}> ({
++    ^bb0(%z_15: f32, %z_16: f32):
++      %z_17 = arith.addf %z_15, %z_16 : f32
++      tt.reduce.return %z_17 : f32
++    }) : (tensor<16x256xf32, #blocked>) -> tensor<16xf32, #ttg.slice<{dim = 1, parent = #blocked}>>
++    %z_11 = tt.reshape %z : tensor<16xf32, #ttg.slice<{dim = 1, parent = #blocked}>> -> tensor<16x1xf32, #linear>
++    %z_12 = ttg.convert_layout %z_11 : tensor<16x1xf32, #linear> -> tensor<16x1xf32, #blocked>
++    %z_13 = tt.broadcast %z_12 : tensor<16x1xf32, #blocked> -> tensor<16x256xf32, #blocked>
++    %z_14 = arith.addf %z_13, %w : tensor<16x256xf32, #blocked>
++    %0 = tt.splat %out : !tt.ptr<f32> -> tensor<16x1x!tt.ptr<f32>, #blocked>
++    %1 = tt.addptr %0, %x : tensor<16x1x!tt.ptr<f32>, #blocked>, tensor<16x1xi32, #blocked>
++    %2 = tt.broadcast %1 : tensor<16x1x!tt.ptr<f32>, #blocked> -> tensor<16x256x!tt.ptr<f32>, #blocked>
++    %3 = tt.addptr %2, %x_5 : tensor<16x256x!tt.ptr<f32>, #blocked>, tensor<16x256xi32, #blocked>
++    tt.store %3, %z_14 : tensor<16x256x!tt.ptr<f32>, #blocked>
++    tt.return
++  }
++}
+-- 
+2.47.0.windows.1
+
