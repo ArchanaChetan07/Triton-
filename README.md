@@ -7,7 +7,7 @@
 [![CUDA](https://img.shields.io/badge/CUDA-13.0-76B900)](https://developer.nvidia.com/cuda-toolkit)
 [![Patch](https://img.shields.io/badge/patch-10987--fix--final-informational)](./10987-fix-final.patch)
 
-Research and engineering kit for **[triton-lang/triton#10987](https://github.com/triton-lang/triton/issues/10987)**: a chained `fp32` division-by-broadcast that feeds a reduction was emitting **4,128 `div.full.f32`** instructions and taking minutes to compile. This repository documents the root cause, ships a minimal compiler patch, and records **before/after numbers from a real GPU build**.
+Research and engineering kit for **[triton-lang/triton#10987](https://github.com/triton-lang/triton/issues/10987)**: a chained `fp32` division-by-broadcast that feeds a reduction was emitting **4,128 `div.full.f32`** instructions and taking minutes to compile. This repository documents the root cause, ships a minimal compiler patch, and records a **before/after benchmark from a real GPU build**.
 
 ---
 
@@ -169,7 +169,7 @@ xychart-beta
 | C - chained, no reduce | 64 | 64 | unchanged |
 | D - reciprocal | 16 | 16 | unchanged |
 
-### Compile time (kernel B)
+### Compile latency (kernel B)
 
 | AOT target | Unpatched | Patched |
 |---|---:|---:|
@@ -187,6 +187,8 @@ xychart-beta
 | `remove-layout-conversions-backward-remat-reuse.mlir` | PASS |
 | `remove-layout-conversions-scf-cleanup.mlir` | PASS |
 | **`remove-layout-conversions-10987.mlir`** (new) | PASS |
+
+**5/5 passing** on the patched `triton-opt`. The PTX gate `test_10987_div_blowup.py` also runs under pytest and passes with `B < 128` `div.full.f32`.
 
 Details: [`VALIDATED.md`](./VALIDATED.md) | analysis: [`ROOT_CAUSE.md`](./ROOT_CAUSE.md) | build steps: [`FIX_PLAYBOOK.md`](./FIX_PLAYBOOK.md)
 
@@ -237,7 +239,7 @@ bash build_and_test_4090.sh ~/triton ./10987-fix-final.patch
 ### Inspect layouts
 
 ```bash
-export PYTHONPATH=/path/to/triton/python   # needed when a system triton wheel shadows the editable build
+export PYTHONPATH=/path/to/triton/python   # needed when the PyTorch-pinned system triton wheel shadows the editable build
 python dump_ttgir.py | grep -nE 'divf|#linear|#blocked'
 ```
 
@@ -260,6 +262,7 @@ python dump_ttgir.py | grep -nE 'divf|#linear|#blocked'
 
 ## Upstream
 
+- **PR: [triton-lang/triton#11117](https://github.com/triton-lang/triton/pull/11117) — open, review requested**
 - Issue: [triton-lang/triton#10987](https://github.com/triton-lang/triton/issues/10987)
 - Related draft (independent approach): [triton-lang/triton#11048](https://github.com/triton-lang/triton/pull/11048)
 
